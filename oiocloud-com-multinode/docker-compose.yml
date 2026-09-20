@@ -5,6 +5,11 @@ services:
     hostname: openldap-oiocloud-node1
     env_file:
       - .env.node1
+      # Entry data in this use-case uses inetOrgPerson/posixAccount. Without
+      # these schemas ldapadd fails with "objectClass: value #0 invalid per syntax".
+      # Kept here rather than in .env.* because .env.* is gitignored.
+    environment:
+      - INCLUDE_SCHEMAS=cosine,inetorgperson,nis
     ports:
       - "392:389"
       - "639:636"

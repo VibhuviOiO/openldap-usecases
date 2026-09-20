@@ -8,6 +8,9 @@ services:
       - LDAP_ADMIN_PASSWORD=AdminPass123!
       - LDAP_ORGANIZATION=Idempotency Test Organization
       - ENABLE_MONITORING=true
+      # Required: the test data uses inetOrgPerson (and posixAccount for nis).
+      # Without these, ldapadd fails with "objectClass: value #0 invalid per syntax".
+      - INCLUDE_SCHEMAS=cosine,inetorgperson,nis
     ports:
       - "389:389"
     volumes:

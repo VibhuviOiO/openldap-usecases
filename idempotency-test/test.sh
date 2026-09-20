@@ -56,7 +56,7 @@ fi
 # Create test data
 echo "→ Creating test data..."
 docker exec -i "$ACTUAL_CONTAINER" ldapadd -x \
-    -D "$ADMIN_DN" -w "$ADMIN_PASS" 2>/dev/null << 'LDIF' || true
+    -D "$ADMIN_DN" -w "$ADMIN_PASS" << 'LDIF'
 dn: ou=PersistenceTest,dc=example,dc=com
 objectClass: organizationalUnit
 ou: PersistenceTest

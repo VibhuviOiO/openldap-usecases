@@ -52,10 +52,24 @@ if ! docker ps --no-trunc | grep -q "$ACTUAL_CONTAINER"; then
 fi
 
 BASE_DN="dc=vibhuvioio,dc=com"
+# The data suffix is not anonymously readable (ACL rule {2} ends in "by * none"),
+# so every check must bind as the admin DN. Load the use-case credentials.
+# Parsed rather than sourced: these files contain unquoted spaces
+# (LDAP_ORGANIZATION=Test Organization) which bash would try to execute.
+for _f in .env.*; do
+    [ -f "$_f" ] || continue
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        case "$_line" in ''|'#'*) continue ;; esac
+        case "$_line" in *=*) export "${_line%%=*}=${_line#*=}" ;; esac
+    done < "$_f"
+    break
+done
+ADMIN_DN="cn=Manager,$BASE_DN"
 
 echo ""
 echo "→ Test 1: Verify base domain accessible..."
 if docker exec "$ACTUAL_CONTAINER" ldapsearch -x \
+    -D "$ADMIN_DN" -w "$LDAP_ADMIN_PASSWORD" \
     -b "$BASE_DN" \
     -s base 2>&1 | grep -q "dn:"; then
     echo -e "${GREEN}✓ Base domain accessible${NC}"
@@ -67,12 +81,14 @@ fi
 echo ""
 echo "→ Test 2: Verify Mahabharata data imported..."
 if docker exec "$ACTUAL_CONTAINER" ldapsearch -x \
+    -D "$ADMIN_DN" -w "$LDAP_ADMIN_PASSWORD" \
     -b "$BASE_DN" \
     "(objectClass=MahabharataUser)" cn 2>&1 | grep -q "^cn:"; then
     echo -e "${GREEN}✓ Mahabharata data imported${NC}"
 else
     # Check alternative - just count entries
     COUNT=$(docker exec "$ACTUAL_CONTAINER" ldapsearch -x \
+        -D "$ADMIN_DN" -w "$LDAP_ADMIN_PASSWORD" \
         -b "$BASE_DN" \
         "(objectClass=*)" 2>/dev/null | grep -c "^dn:" || echo "0")
     if [ "$COUNT" -gt 2 ]; then

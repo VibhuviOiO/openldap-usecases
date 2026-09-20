@@ -43,6 +43,17 @@ echo "→ Waiting for cluster to initialize (90s)..."
 sleep 90
 
 BASE_DN="dc=oiocloud,dc=com"
+# Credentials for the authenticated checks below.
+# Parsed rather than sourced: these files contain unquoted spaces
+# (LDAP_ORGANIZATION=OIO Cloud Services) which bash would try to execute.
+for _f in .env.*; do
+    [ -f "$_f" ] || continue
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        case "$_line" in ''|'#'*) continue ;; esac
+        case "$_line" in *=*) export "${_line%%=*}=${_line#*=}" ;; esac
+    done < "$_f"
+    break
+done
 ADMIN_DN="cn=Manager,$BASE_DN"
 ADMIN_PASS="changeme"
 
@@ -56,6 +67,7 @@ ALL_PASSED=true
 echo ""
 echo "→ Test 1: Node 1 accessibility..."
 if docker exec "$NODE1" ldapsearch -x \
+    -D "$ADMIN_DN" -w "$LDAP_ADMIN_PASSWORD" \
     -b "$BASE_DN" \
     -s base 2>&1 | grep -q "dn:"; then
     echo -e "${GREEN}✓ Node 1 responding${NC}"
@@ -67,6 +79,7 @@ fi
 echo ""
 echo "→ Test 2: Node 2 accessibility..."
 if docker exec "$NODE2" ldapsearch -x \
+    -D "$ADMIN_DN" -w "$LDAP_ADMIN_PASSWORD" \
     -b "$BASE_DN" \
     -s base 2>&1 | grep -q "dn:"; then
     echo -e "${GREEN}✓ Node 2 responding${NC}"
@@ -78,6 +91,7 @@ fi
 echo ""
 echo "→ Test 3: Node 3 accessibility..."
 if docker exec "$NODE3" ldapsearch -x \
+    -D "$ADMIN_DN" -w "$LDAP_ADMIN_PASSWORD" \
     -b "$BASE_DN" \
     -s base 2>&1 | grep -q "dn:"; then
     echo -e "${GREEN}✓ Node 3 responding${NC}"

@@ -8,9 +8,11 @@ logs/
 !.env.example
 
 # Docker secrets - never commit actual secrets
-secrets/*.txt
-secrets/*.key
-secrets/*.pem
+# Root-anchored patterns like "secrets/*.txt" do NOT match nested paths,
+# so they missed docker-secrets/secrets/*.txt. Use ** across the repo.
+**/secrets/*.txt
+**/secrets/*.key
+**/secrets/*.pem
 
 # Backup files
 *.bak

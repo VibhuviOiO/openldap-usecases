@@ -8,6 +8,12 @@ set -e
 IMAGE_TAG="${1:-latest}"
 IMAGE="vibhuvioio/openldap:${IMAGE_TAG}"
 CONTAINER_NAME="openldap-secrets-test"
+
+# The secret files are gitignored, so generate them if this is a fresh clone.
+mkdir -p secrets
+[ -f secrets/admin_password.txt ] || printf '%s' 'SecureAdminP@ssw0rd123!' > secrets/admin_password.txt
+[ -f secrets/config_password.txt ] || printf '%s' 'SecureConfigP@ssw0rd123!' > secrets/config_password.txt
+
 COMPOSE_FILE="docker-compose.yml"
 
 echo "═══════════════════════════════════════════════════════════════"
