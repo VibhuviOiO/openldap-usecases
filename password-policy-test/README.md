@@ -1,113 +1,127 @@
-# Password Policy Test Use-Case
+# password-policy-test
 
-This use-case validates the OpenLDAP password policy overlay functionality, ensuring that password policies are correctly applied and enforced.
+`ppolicy` rejects weak passwords and locks accounts.
 
-## Overview
-
-- **Domain**: `test.com`
-- **Base DN**: `dc=test,dc=com`
-- **Admin DN**: `cn=Manager,dc=test,dc=com`
-- **Ports**: 391 (LDAP), 638 (LDAPS)
-- **Feature**: Password Policy Overlay (`ENABLE_PASSWORD_POLICY=true`)
-
-## Default Password Policy
-
-The following password policy is automatically configured on startup:
-
-| Attribute | Value | Description |
-|-----------|-------|-------------|
-| `pwdMinLength` | 8 | Minimum password length |
-| `pwdMaxFailure` | 5 | Maximum failed login attempts |
-| `pwdLockout` | TRUE | Account lockout enabled |
-| `pwdLockoutDuration` | 1800 | Lockout duration in seconds (30 min) |
-| `pwdMaxAge` | 7776000 | Password expiration in seconds (90 days) |
-| `pwdInHistory` | 5 | Number of passwords in history |
-| `pwdMustChange` | TRUE | User must change password on first login |
-
-## Quick Start
+## 1. Create the env file
 
 ```bash
-# Ensure the shared network exists
-docker network create ldap-shared-network 2>/dev/null || true
+cd password-policy-test
+cp .env.password-policy.example .env.password-policy
+cat .env.password-policy | grep -v PASSWORD
+```
+`.env.*` is gitignored, so the copy is what makes it run.
 
-# Start the OpenLDAP container with password policy enabled
-docker-compose up -d
+## 2. Pick the image
 
-# View logs to see test results
-docker logs -f openldap-password-policy
+```bash
+export LDAP_IMAGE=vibhuvioio/openldap:2.6.10
 ```
 
-## Automated Tests
-
-The `test-password-policy.sh` script automatically runs on container startup and validates:
-
-1. **Overlay Configuration** - Verifies ppolicy overlay is loaded in cn=config
-2. **Policy OU Exists** - Confirms `ou=Policies,dc=test,dc=com` exists
-3. **Default Policy Exists** - Confirms `cn=default,ou=Policies,dc=test,dc=com` exists
-4. **Policy Attributes** - Validates pwdMinLength, pwdMaxFailure, pwdLockout settings
-5. **Password Enforcement** - Tests that weak passwords are rejected and strong passwords are accepted
-
-## Manual Testing
+## 3. Start it
 
 ```bash
-# Search for password policy
-ldapsearch -x -H ldap://localhost:391 \
-  -D "cn=Manager,dc=test,dc=com" -w admin123 \
-  -b "cn=default,ou=Policies,dc=test,dc=com" -s base
+LDAP_IMAGE=$LDAP_IMAGE docker compose up -d
+docker compose ps
+```
+Host port 391 maps to container 389.
 
-# Try to create a user with weak password (should fail)
-ldapadd -x -H ldap://localhost:391 \
-  -D "cn=Manager,dc=test,dc=com" -w admin123 <<EOF
-dn: uid=weakuser,ou=People,dc=test,dc=com
+## 4. Watch the policy steps
+
+Expect the ppolicy module, overlay, and the `ou=Policies` entries.
+
+```bash
+docker logs openldap-password-policy | grep 'STEP'
+```
+
+## 5. The overlay and the default policy
+
+```bash
+docker exec openldap-password-policy ldapsearch -Y EXTERNAL -H ldapi:/// \
+  -b cn=config '(olcOverlay=ppolicy)' dn | grep '^dn:'
+```
+
+```bash
+PW=$(grep '^LDAP_ADMIN_PASSWORD=' .env.password-policy | cut -d= -f2-)
+
+docker exec openldap-password-policy ldapsearch -x -H ldap://localhost \
+  -D cn=Manager,dc=test,dc=com -w "$PW" \
+  -b cn=default,ou=Policies,dc=test,dc=com
+```
+Read `pwdMinLength`, `pwdInHistory`, `pwdLockout`, `pwdMaxAge`.
+
+## 6. A weak password is refused
+
+```bash
+docker exec -i openldap-password-policy ldapadd -x -H ldap://localhost \
+  -D cn=Manager,dc=test,dc=com -w "$PW" <<'LDIF'
+dn: uid=bob,dc=test,dc=com
 objectClass: inetOrgPerson
-uid: weakuser
-cn: Weak User
-sn: User
-userPassword: 123
-EOF
-
-# Create a user with strong password (should succeed)
-ldapadd -x -H ldap://localhost:391 \
-  -D "cn=Manager,dc=test,dc=com" -w admin123 <<EOF
-dn: uid=stronguser,ou=People,dc=test,dc=com
-objectClass: inetOrgPerson
-uid: stronguser
-cn: Strong User
-sn: User
-userPassword: MySecurePass123!
-EOF
+uid: bob
+cn: Bob
+sn: Example
+userPassword: bob
+LDIF
 ```
+Rejected by the policy, not by the schema.
 
-## Files
-
-- `.env.password-policy` - LDAP configuration with `ENABLE_PASSWORD_POLICY=true`
-- `docker-compose.yml` - Container configuration
-- `test-password-policy.sh` - Automated validation tests
-
-## Cleanup
+## 7. A good password is accepted
 
 ```bash
-# Stop but keep data
-docker-compose down
-
-# Stop and remove all data
-docker-compose down -v
+docker exec -i openldap-password-policy ldapadd -x -H ldap://localhost \
+  -D cn=Manager,dc=test,dc=com -w "$PW" <<'LDIF'
+dn: uid=bob,dc=test,dc=com
+objectClass: inetOrgPerson
+uid: bob
+cn: Bob
+sn: Example
+userPassword: B0b_StrongP@ss123!
+LDIF
+```
+```
+adding new entry "uid=bob,dc=test,dc=com"
 ```
 
-## Troubleshooting
+## 8. Bind as that user
 
-If password policy is not being enforced:
+```bash
+docker exec openldap-password-policy ldapsearch -x -H ldap://localhost \
+  -D uid=bob,dc=test,dc=com -w 'B0b_StrongP@ss123!' \
+  -b dc=test,dc=com -s base dn
+```
 
-1. Check logs: `docker logs openldap-password-policy`
-2. Verify overlay is loaded:
-   ```bash
-   ldapsearch -x -H ldap://localhost:391 \
-     -D "cn=Manager,dc=test,dc=com" -w admin123 \
-     -b "cn=config" "(objectClass=olcPPolicyConfig)"
-   ```
-3. Check policy entry exists:
-   ```bash
-   ldapsearch -x -H ldap://localhost:391 \
-     -D "cn=Manager,dc=test,dc=com" -w admin123 \
-     -b "ou=Policies,dc=test,dc=com"
-   ```
+## 9. Lock the account with wrong passwords
+
+```bash
+for i in 1 2 3 4 5; do
+  docker exec openldap-password-policy ldapsearch -x -H ldap://localhost \
+    -D uid=bob,dc=test,dc=com -w wrong$i -b dc=test,dc=com -s base dn 2>&1 | tail -1
+done
+```
+After `pwdMaxFailure` attempts: `Invalid credentials (49)` each time, then the
+account is locked and even the right password stops working.
+
+## 10. See the lockout attribute
+
+```bash
+docker exec openldap-password-policy ldapsearch -x -H ldap://localhost \
+  -D cn=Manager,dc=test,dc=com -w "$PW" \
+  -b uid=bob,dc=test,dc=com pwdAccountLockedTime pwdFailureTime
+```
+
+## 11. Tear down
+
+```bash
+docker compose down -v
+```
+
+## What you learned
+
+- `ppolicy` enforces rules on writes, not just on binds
+- The policy entry lives at `cn=default,ou=Policies,<base>`
+- Failed binds are counted; enough of them lock the account
+- The lock is visible as `pwdAccountLockedTime` on the entry
+
+## Notes
+
+- The image creates `ou=Policies` and `cn=default` on first init
+- `ENABLE_PASSWORD_POLICY=true` in the env file turns all of this on

@@ -1,0 +1,31 @@
+# Standalone server: the use-case 01 topology, installed with Helm.
+#   helm install ldap <chart> -n ldap-helm -f values-single.yaml
+#
+# replicaCount 1 forces replication off in the chart, whatever replication.enabled
+# says, because the image's healthcheck fails hard when replication is on with no
+# peer to replicate from.
+replicaCount: 1
+replication:
+  enabled: false
+
+auth:
+  existingSecret: ldap-auth
+
+ldap:
+  domain: example.com
+  organization: Example Organization
+
+features:
+  monitoring: true
+
+persistence:
+  enabled: true
+  data:
+    size: 5Gi
+  config:
+    size: 1Gi
+  logs:
+    size: 1Gi
+
+networkPolicy:
+  enabled: true

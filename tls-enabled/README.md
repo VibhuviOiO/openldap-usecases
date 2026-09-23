@@ -1,129 +1,102 @@
-# TLS-Enabled Use-Case
+# tls-enabled
 
-Tests TLS/SSL connectivity with StartTLS and LDAPS.
+Serve `ldaps://` on 636 and StartTLS on 389.
 
-## Features Tested
-
-| Feature | Validation |
-|---------|-----------|
-| **StartTLS** | `ldapsearch -ZZ` upgrade from plaintext to TLS |
-| **LDAPS** | Direct SSL connection on port 636 |
-| **Certificate loading** | Server starts with provided certs |
-
-## Quick Start
+## 1. Look at the certificate
 
 ```bash
-cd use-cases/tls-enabled
-
-# TLS certificates are pre-generated (self-signed for testing)
-# In production, use proper certificates from your CA
-
-# Start OpenLDAP with TLS
-docker-compose up -d
-
-# Wait for initialization
-docker logs -f openldap-tls
+cd tls-enabled
+ls -la certs/
+openssl x509 -in certs/ldap.crt -noout -subject -dates
 ```
+Self-signed, already in the repository.
 
-## Testing TLS
-
-### Test 1: StartTLS (recommended)
+## 2. Pick the image
 
 ```bash
-# Search using StartTLS (upgrades connection to TLS)
-ldapsearch -x -H ldap://localhost:389 -ZZ \
-  -D "cn=Manager,dc=example,dc=com" \
-  -w "AdminPass123!" \
-  -b "dc=example,dc=com" \
-  -s base
-
-# -ZZ: Require TLS (fail if not available)
-# -Z:  Use TLS if available (don't fail if not)
+export LDAP_IMAGE=vibhuvioio/openldap:2.6.10
 ```
 
-### Test 2: LDAPS (SSL)
+## 3. Start it
 
 ```bash
-# Direct SSL connection (note: ldaps:// URI and port 636)
-LDAPTLS_REQCERT=never ldapsearch -x -H ldaps://localhost:636 \
-  -D "cn=Manager,dc=example,dc=com" \
-  -w "AdminPass123!" \
-  -b "dc=example,dc=com" \
-  -s base
-
-# LDAPTLS_REQCERT=never: Skip cert validation (for self-signed testing only!)
+LDAP_IMAGE=$LDAP_IMAGE docker compose up -d
+docker compose ps
 ```
 
-### Test 3: Verify TLS is Required
+## 4. Watch the TLS step
+
+Expect `Configuring TLS...` then `TLS configured`.
 
 ```bash
-# This should FAIL if TLS is required (it is by default after configuration)
-ldapwhoami -x -H ldap://localhost:389
-# Expected: anonymous bind may still work, but operations may require TLS
+docker logs openldap-tls | grep -iE 'TLS|ldaps'
 ```
 
-## Certificate Management
-
-### Self-Signed (Testing Only)
-
-Pre-generated certificates are included for testing:
-```
-certs/
-├── ldap.crt  # Certificate
-└── ldap.key  # Private key
-```
-
-### Production Certificates
-
-Replace with proper certificates:
-
-```yaml
-volumes:
-  - /path/to/your/cert.pem:/certs/ldap.crt:ro
-  - /path/to/your/key.pem:/certs/ldap.key:ro
-```
-
-### Generate New Self-Signed Certs
+## 5. The paths reached the config
 
 ```bash
-cd use-cases/tls-enabled
-
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout certs/ldap.key \
-  -out certs/ldap.crt \
-  -subj "/C=US/ST=State/L=City/O=Organization/CN=openldap.example.com"
+docker exec openldap-tls ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config \
+  olcTLSCertificateFile olcTLSCertificateKeyFile | grep olcTLS
+```
+```
+olcTLSCertificateFile: /certs/ldap.crt
+olcTLSCertificateKeyFile: /certs/ldap.key
 ```
 
-## Troubleshooting
+## 6. slapd listens on 636
 
-### "Can't contact LDAP server"
-
-Check if slapd started correctly:
 ```bash
-docker logs openldap-tls | grep -i tls
+docker exec openldap-tls ldapsearch -x -H ldaps://localhost:636 \
+  -D cn=Manager,dc=example,dc=com -w 'AdminPass123!' \
+  -b dc=example,dc=com -s base dn
 ```
+Fails on the certificate — it is self-signed.
 
-### "Connect error"
+## 7. Accept the self-signed certificate
 
-Verify certificates are readable:
+Expect `dn: dc=example,dc=com`.
+
 ```bash
-docker exec openldap-tls ls -la /certs/
+docker exec openldap-tls env LDAPTLS_REQCERT=never \
+  ldapsearch -x -H ldaps://localhost:636 \
+  -D cn=Manager,dc=example,dc=com -w 'AdminPass123!' \
+  -b dc=example,dc=com -s base dn
 ```
 
-### Certificate verification failed
+## 8. StartTLS on the plain port
 
-For self-signed certs, use:
 ```bash
-# Skip verification (testing only!)
-LDAPTLS_REQCERT=never ldapsearch ...
+docker exec openldap-tls env LDAPTLS_REQCERT=never \
+  ldapsearch -x -ZZ -H ldap://localhost:389 \
+  -D cn=Manager,dc=example,dc=com -w 'AdminPass123!' \
+  -b dc=example,dc=com -s base dn
+```
+`-ZZ` requires TLS. It fails if the server does not offer it.
 
-# Or trust the specific cert
-LDAPTLS_CACERT=./certs/ldap.crt ldapsearch ...
+## 9. Plain 389 is still plain
+
+```bash
+docker exec openldap-tls ldapsearch -x -H ldap://localhost:389 \
+  -D cn=Manager,dc=example,dc=com -w 'AdminPass123!' \
+  -b dc=example,dc=com -s base dn
+```
+Works unencrypted. StartTLS is what upgrades it.
+
+## 10. Tear down
+
+```bash
+docker compose down -v
 ```
 
-## Security Notes
+## What you learned
 
-- Self-signed certificates are for **testing only**
-- In production, use certificates from a trusted CA
-- Consider using cert-manager in Kubernetes environments
-- Client certificate authentication can be added for additional security
+- `LDAP_TLS_CERT` and `LDAP_TLS_KEY` write `olcTLSCertificateFile` into `cn=config`
+- `ldaps://` is a separate listener on 636; `-ZZ` upgrades 389
+- slapd reads the key as uid 55, so a `0400` root-owned mount silently
+  breaks every handshake
+- `LDAPTLS_REQCERT=never` is for self-signed certificates only
+
+## Notes
+
+- Replace `certs/` with a CA-signed pair before production
+- `LDAP_TLS_VERIFY_CLIENT=demand` requires client certificates

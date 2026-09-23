@@ -1,168 +1,125 @@
-# Docker Secrets Use Case
+# docker-secrets
 
-This use-case demonstrates how to use Docker secrets to securely manage OpenLDAP passwords instead of passing them as plaintext environment variables.
+Run the container with the password in a file instead of an environment variable.
 
-## Overview
-
-Docker secrets provide a secure way to manage sensitive data like passwords. With Docker secrets:
-- Passwords are stored in encrypted files on the host
-- Secrets are mounted as files in `/run/secrets/` inside the container
-- The `startup.sh` script supports `_FILE` variants for password variables
-- Passwords never appear in environment variables or process lists
-
-## Files
-
-```
-.
-├── docker-compose.yml      # Compose file with secrets configuration
-├── secrets/
-│   ├── admin_password.txt     # Admin password (add to .gitignore!)
-│   └── config_password.txt    # Config DB password (add to .gitignore!)
-├── logs/                   # Log output directory
-└── README.md              # This file
-```
-
-## Quick Start
-
-### 1. Create Secret Files
-
-Create the password files (these are gitignored in production):
+## 1. Create the secret files
 
 ```bash
+cd docker-secrets
 mkdir -p secrets
-echo "YourSecureAdminPassword" > secrets/admin_password.txt
-echo "YourSecureConfigPassword" > secrets/config_password.txt
+printf 'AdminP@ssw0rd123!'  > secrets/admin_password.txt
+printf 'ConfigP@ssw0rd123!' > secrets/config_password.txt
+chmod 600 secrets/*.txt
+ls -la secrets/
 ```
+`printf`, not `echo` — no trailing newline.
 
-**Important:** Add `secrets/*.txt` to `.gitignore` to avoid committing passwords!
-
-### 2. Start OpenLDAP
+## 2. Point compose at them
 
 ```bash
-docker-compose up -d
+grep -A4 '^secrets:' docker-compose.yml
 ```
-
-### 3. Verify Secrets Are Used
-
-```bash
-# Check that passwords are NOT in environment variables
-docker exec openldap-secrets env | grep -i password
-# Should show: LDAP_ADMIN_PASSWORD_FILE=/run/secrets/ldap_admin_password
-# But NOT the actual password value
-
-# Verify the secret file is mounted
-docker exec openldap-secrets cat /run/secrets/ldap_admin_password
+Expect one name per file:
 ```
-
-### 4. Test Authentication
-
-```bash
-# Get the admin password from the secret file
-ADMIN_PASS=$(cat secrets/admin_password.txt)
-
-# Test LDAP connection
-ldapsearch -x -H ldap://localhost:389 \
-  -D "cn=Manager,dc=example,dc=com" \
-  -w "$ADMIN_PASS" \
-  -b "dc=example,dc=com" \
-  -s base
-```
-
-## How It Works
-
-### Docker Compose Configuration
-
-```yaml
-services:
-  openldap:
-    environment:
-      # Use _FILE to point to the secret file path
-      - LDAP_ADMIN_PASSWORD_FILE=/run/secrets/ldap_admin_password
-      - LDAP_CONFIG_PASSWORD_FILE=/run/secrets/ldap_config_password
-    secrets:
-      - ldap_admin_password
-      - ldap_config_password
-
 secrets:
   ldap_admin_password:
     file: ./secrets/admin_password.txt
   ldap_config_password:
     file: ./secrets/config_password.txt
 ```
+Each name is backed by a host file. Compose mounts it at `/run/secrets/<name>`.
 
-### startup.sh Logic
-
-The `startup.sh` script checks for `_FILE` variants:
+## 3. The container gets a path, not a value
 
 ```bash
-if [ -n "$LDAP_ADMIN_PASSWORD_FILE" ] && [ -f "$LDAP_ADMIN_PASSWORD_FILE" ]; then
-    LDAP_ADMIN_PASSWORD=$(cat "$LDAP_ADMIN_PASSWORD_FILE")
-fi
+grep -B2 -A2 'PASSWORD_FILE' docker-compose.yml
+```
+Expect:
+```
+- LDAP_ADMIN_PASSWORD_FILE=/run/secrets/ldap_admin_password
+- LDAP_CONFIG_PASSWORD_FILE=/run/secrets/ldap_config_password
 ```
 
-This means:
-1. If `LDAP_ADMIN_PASSWORD_FILE` is set and the file exists
-2. Read the password from the file
-3. Use it for OpenLDAP configuration
+## 4. Pick the image and start it
 
-## Security Benefits
-
-| Plaintext Env Var | Docker Secrets |
-|-------------------|----------------|
-| Visible in `docker inspect` | Hidden from container metadata |
-| In process list (`ps e`) | Only in file readable by container |
-| May be logged | Not logged by default |
-| Committed to git risk | Can be gitignored |
-
-## Production Recommendations
-
-1. **Never commit secrets to git:**
-   ```bash
-   echo "secrets/*.txt" >> .gitignore
-   ```
-
-2. **Use proper secret management in production:**
-   - Docker Swarm: `docker secret create`
-   - Kubernetes: Sealed Secrets or External Secrets Operator
-   - CI/CD: Inject secrets from vault at deploy time
-
-3. **Rotate secrets regularly:**
-   ```bash
-   # Update secret file
-   echo "NewSecurePassword" > secrets/admin_password.txt
-   # Restart container to pick up new secret
-   docker-compose restart
-   ```
-
-4. **Monitor secret access:**
-   ```bash
-   # Check who can read the secret files
-   ls -la secrets/
-   ```
-
-## Troubleshooting
-
-### Container fails to start
-
-Check if secret files exist:
 ```bash
-ls -la secrets/
+export LDAP_IMAGE=vibhuvioio/openldap:2.6.10
+LDAP_IMAGE=$LDAP_IMAGE docker compose up -d
+docker compose ps
 ```
+One container, initialising.
 
-### Permission denied on secrets
+## 5. Watch the password being loaded
 
-Ensure the secret files are readable:
 ```bash
-chmod 600 secrets/*.txt
+docker logs -f openldap-secrets
 ```
+Expect these two lines:
+```
+[INFO]  ℹ️  Loaded LDAP_ADMIN_PASSWORD from /run/secrets/ldap_admin_password
+[OK]    ✅ Container is ready
+```
+`Ctrl-C` to stop following.
 
-### Wrong password errors
+**The image opened a file to get the password.** That is the whole use-case.
 
-Verify the password file has no trailing newlines (if your password shouldn't have them):
+## 6. The value is not in the environment
+
 ```bash
-# Check for newlines
-od -c secrets/admin_password.txt
-
-# Write without newline
-echo -n "password" > secrets/admin_password.txt
+docker exec openldap-secrets env | grep -i password
 ```
+Expect paths only:
+```
+LDAP_ADMIN_PASSWORD_FILE=/run/secrets/ldap_admin_password
+LDAP_CONFIG_PASSWORD_FILE=/run/secrets/ldap_config_password
+```
+
+```bash
+docker inspect openldap-secrets | grep -i -A2 password
+```
+Expect the same. There is no value in the container metadata to leak.
+
+## 7. The file inside the container
+
+```bash
+docker exec openldap-secrets ls -la /run/secrets/
+docker exec openldap-secrets cat /run/secrets/ldap_admin_password
+```
+Expect the text you wrote in step 1.
+
+## 8. Bind with the secret
+
+```bash
+docker exec openldap-secrets ldapsearch -x -H ldap://localhost \
+  -D cn=Manager,dc=example,dc=com \
+  -y /run/secrets/ldap_admin_password \
+  -b dc=example,dc=com -s base dn
+```
+Expect `dn: dc=example,dc=com`.
+
+`-y <file>` reads the password from the file. `-w 'value'` puts it in `argv`,
+where anything on the host can read `/proc/<pid>/cmdline`.
+
+## 9. Tear down
+
+```bash
+docker compose down -v
+```
+Expect the container and the volumes removed.
+
+## What you learned
+
+- A secret is a file on the host, mounted into the container at
+  `/run/secrets/<name>`
+- The compose `secrets:` block names it; the `*_FILE` variable holds its path
+- The image reads the file at startup; the value never enters the environment
+- `env` and `docker inspect` show the path, never the value
+- `-y file` keeps the password out of the process list; `-w value` does not
+- `secrets/*.txt` is gitignored, so a fresh clone must create it first
+
+## Notes
+
+- The image strips CR/LF from the file; `ldapsearch -y` does not, so a file
+  ending in a newline breaks `-y` (a Kubernetes Secret often has one)
+- Production: Docker Swarm `docker secret`, Kubernetes Secrets, or a vault
+- Changing the password later is a separate use-case, not this one

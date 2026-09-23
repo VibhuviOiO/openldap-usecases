@@ -1,0 +1,49 @@
+# Three providers in a multi-provider mesh: the use-case 02 topology, with what
+# the chart adds.
+#   helm install ldap <chart> -n ldap-helm -f values-three.yaml
+replicaCount: 3
+
+# StartTLS needs tls.enabled so every node has a certificate; without it the
+# replication bind password crosses the network in cleartext.
+replication:
+  enabled: true
+  startTLS: false
+
+auth:
+  existingSecret: ldap-auth
+
+ldap:
+  domain: example.com
+  organization: Example Organization
+
+features:
+  memberOf: false
+  passwordPolicy: false
+  auditLog: false
+  monitoring: true
+
+persistence:
+  enabled: true
+  data:
+    size: 5Gi
+  config:
+    size: 1Gi
+  logs:
+    size: 1Gi
+
+# Keeps a provider serving during a node drain, and spreads the three over nodes
+# so losing one node cannot take the cluster down.
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+spreadAcrossNodes: true
+
+networkPolicy:
+  enabled: true
+  ingressFrom: []
+
+# Online LDIF export on a schedule. See the chart's README for what "online"
+# does and does not guarantee.
+backup:
+  enabled: false
+  schedule: "0 2 * * *"

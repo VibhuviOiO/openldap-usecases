@@ -1,0 +1,236 @@
+# Three OpenLDAP servers in a multi-provider (N-way multi-master) mesh — the
+# plain-manifest equivalent of the replication docker-compose file.
+#
+#   kubectl apply -f manifests.yaml
+#
+# Read 02-three-node/README.md alongside this file.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ldap-cluster
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ldap-auth
+  namespace: ldap-cluster
+type: Opaque
+stringData:
+  admin-password: "AdminP@ssw0rd123!"
+  config-password: "ConfigP@ssw0rd123!"
+  # Least privilege: replication binds as cn=replicator instead of as the
+  # directory rootDN, which would otherwise store the admin credential in
+  # cleartext in cn=config on every node.
+  replication-password: "ReplP@ssw0rd123!"
+---
+# The headless Service. It is not a load balancer: with clusterIP: None it makes
+# the DNS name of each POD resolvable, which is what lets the three servers find
+# each other:
+#
+#   ldap-0.ldap-headless.ldap-cluster.svc.cluster.local
+#   ldap-1.ldap-headless.ldap-cluster.svc.cluster.local
+#   ldap-2.ldap-headless.ldap-cluster.svc.cluster.local
+#
+# A Deployment would give the pods random names and those URLs would change on
+# every restart, so this has to be a StatefulSet.
+#
+# publishNotReadyAddresses: a provider that is still initialising must still be
+# resolvable by its peers, otherwise none of them can bootstrap.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ldap-headless
+  namespace: ldap-cluster
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: ldap
+  ports:
+    - name: ldap
+      port: 389
+      targetPort: ldap
+---
+# A normal Service for clients. Note this is NOT a write balancer: every
+# provider accepts writes and reconciles asynchronously, so concurrent changes
+# to the same attribute on two providers can diverge. Point reads here; point
+# writes at one provider or at something you control.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ldap
+  namespace: ldap-cluster
+spec:
+  selector:
+    app: ldap
+  ports:
+    - name: ldap
+      port: 389
+      targetPort: ldap
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ldap
+  namespace: ldap-cluster
+spec:
+  serviceName: ldap-headless
+  replicas: 3
+  # Every provider must come up together. Waiting for ordinal 0 to be Ready
+  # first would serialise startup and stall if ordinal 0 needs a peer.
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: ldap
+  template:
+    metadata:
+      labels:
+        app: ldap
+    spec:
+      automountServiceAccountToken: false
+      # Longer than the 10s default: slapd needs to flush on SIGTERM, and a
+      # SIGKILL mid-transaction forces a full database scan on the next start.
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        # Same reason as the single-node use-case: a PersistentVolumeClaim is
+        # mounted empty and hides the cn=config skeleton the image ships. With
+        # volumeClaimTemplates below, each replica gets its OWN config volume.
+        - name: seed-config
+          image: vibhuvioio/openldap:2.6.10
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              if [ -n "$(ls -A /config)" ]; then
+                echo "cn=config already initialised, leaving it alone"
+                exit 0
+              fi
+              cp -a /etc/openldap/slapd.d/. /config/
+              echo "seeded $(find /config -mindepth 1 | wc -l) cn=config entries"
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      containers:
+        - name: openldap
+          image: vibhuvioio/openldap:2.6.10
+          command: ["/bin/bash", "-c"]
+          args:
+            # ------------------------------------------------------------------
+            # The shim that makes three identical pods into three distinct
+            # providers. Everything here is derived from the pod's own name,
+            # which is stable because this is a StatefulSet.
+            # ------------------------------------------------------------------
+            - |
+              set -euo pipefail
+
+              # ldap-0 -> SERVER_ID 1, ldap-1 -> 2, ldap-2 -> 3.
+              # It MUST be explicit and unique: two nodes sharing a serverID
+              # corrupt CSN ordering, and the image refuses to start with
+              # replication enabled if it was left at the default.
+              ORDINAL="${HOSTNAME##*-}"
+              export SERVER_ID=$((ORDINAL + 1))
+
+              HEADLESS="ldap-headless.ldap-cluster.svc.cluster.local"
+              PEERS=""
+              SIDS=""
+              for i in 0 1 2; do
+                NAME="ldap-${i}"
+                URL="ldap://${NAME}.${HEADLESS}:389"
+                SIDS="${SIDS}${SIDS:+,}$((i + 1))=${URL}"
+                if [ "$i" != "$ORDINAL" ]; then
+                  PEERS="${PEERS}${PEERS:+,}${NAME}.${HEADLESS}"
+                fi
+              done
+              export REPLICATION_PEERS="$PEERS"
+              export REPLICATION_SERVER_IDS="$SIDS"
+
+              echo "SERVER_ID=${SERVER_ID}"
+              echo "REPLICATION_PEERS=${REPLICATION_PEERS}"
+              exec /usr/local/bin/startup.sh
+          ports:
+            - name: ldap
+              containerPort: 389
+          env:
+            - name: LDAP_DOMAIN
+              value: example.com
+            - name: LDAP_ORGANIZATION
+              value: Example Organization
+            - name: LDAP_ADMIN_PASSWORD_FILE
+              value: /run/secrets/admin-password
+            - name: LDAP_CONFIG_PASSWORD_FILE
+              value: /run/secrets/config-password
+            - name: ENABLE_REPLICATION
+              value: "true"
+            - name: LDAP_REPLICATION_PASSWORD_FILE
+              value: /run/secrets/replication-password
+            - name: ENABLE_MONITORING
+              value: "true"
+            - name: INCLUDE_SCHEMAS
+              value: cosine,inetorgperson,nis
+          # healthcheck.sh auto is a LOCAL check: it requires syncprov, an
+          # olcSyncRepl statement and a contextCSN on THIS node. It does not
+          # require a reachable peer, so one provider being down never restarts
+          # the others.
+          startupProbe:
+            exec:
+              command: ["/usr/local/bin/scripts/healthcheck.sh", "auto"]
+            # 60 x 5s = 300s, matching the image's REPLICATION_CSN_GRACE: a fresh
+            # node legitimately has no contextCSN for a while.
+            failureThreshold: 60
+            periodSeconds: 5
+          readinessProbe:
+            exec:
+              command: ["/usr/local/bin/scripts/healthcheck.sh", "auto"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["/usr/local/bin/scripts/healthcheck.sh", "auto"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/ldap
+            - name: config
+              mountPath: /etc/openldap/slapd.d
+            - name: logs
+              mountPath: /logs
+            - name: secrets
+              mountPath: /run/secrets
+              readOnly: true
+      volumes:
+        - name: secrets
+          secret:
+            secretName: ldap-auth
+            defaultMode: 0400
+  # One volume set PER POD. Never share these between replicas: LMDB is
+  # single-writer, so two slapd processes on the same data.mdb corrupt it.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+    - metadata:
+        name: config
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+    - metadata:
+        name: logs
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

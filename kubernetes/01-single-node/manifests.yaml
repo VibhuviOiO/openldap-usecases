@@ -1,0 +1,237 @@
+# One OpenLDAP server, three volumes — the docker-compose equivalent.
+#
+#   kubectl apply -f manifests.yaml
+#
+# Read 01-single-node/README.md alongside this file; it explains each block.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ldap-single
+---
+# Passwords. Kubernetes stores Secrets base64-encoded, NOT encrypted, and mounts
+# them into the pod as files. The image reads the *_FILE variants, so the
+# password never appears in an environment variable or in `kubectl describe pod`.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ldap-auth
+  namespace: ldap-single
+type: Opaque
+stringData:
+  admin-password: "AdminP@ssw0rd123!"
+  config-password: "ConfigP@ssw0rd123!"
+---
+# Three volumes, exactly the three volumes the compose file mounts:
+#
+#   ldap-data   -> /var/lib/ldap          the directory itself (LMDB)
+#   ldap-config -> /etc/openldap/slapd.d  cn=config: ACLs, overlays, indices
+#   ldap-logs   -> /logs                  audit log and slapcat output
+#
+# `storageClassName` is left off so the cluster's default provisioner is used.
+# On k3s and most clouds that is `local-path` / a CSI driver with
+# volumeBindingMode: WaitForFirstConsumer, which means the claim stays Pending
+# until a pod consumes it. That is normal, not a hang.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ldap-data
+  namespace: ldap-single
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ldap-config
+  namespace: ldap-single
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ldap-logs
+  namespace: ldap-single
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ldap
+  namespace: ldap-single
+spec:
+  replicas: 1
+  # Recreate, never RollingUpdate. The volumes are ReadWriteOnce, so a rolling
+  # update would try to start the new pod while the old one still holds them and
+  # the new pod would sit in ContainerCreating forever.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ldap
+  template:
+    metadata:
+      labels:
+        app: ldap
+    spec:
+      # ------------------------------------------------------------------
+      # Required with this image, and easy to miss.
+      #
+      # The Secret is mounted at /run/secrets, the Docker-secrets convention the
+      # image expects. But /var/run is a symlink to /run, and Kubernetes projects
+      # the service-account token at /var/run/secrets/kubernetes.io/serviceaccount
+      # -- i.e. INSIDE that read-only mount. The kubelet cannot create the
+      # mountpoint and the pod dies before starting:
+      #
+      #   error mounting ".../kube-api-access-..." to rootfs at
+      #   "/var/run/secrets/kubernetes.io/serviceaccount": create mountpoint ...
+      #   read-only file system
+      #
+      # Nothing here talks to the API server, so the token is not needed.
+      automountServiceAccountToken: false
+
+      # ------------------------------------------------------------------
+      # THE part that is different from docker-compose.
+      #
+      # Docker copies the contents of the image's directory into a fresh named
+      # volume the first time it is used. Kubernetes mounts the PersistentVolume
+      # Claim EMPTY, hiding whatever the image had at that path. This image ships
+      # a 9-file cn=config skeleton at /etc/openldap/slapd.d; without it slapd
+      # cannot start at all:
+      #
+      #   could not stat config file "/etc/openldap/slapd.conf": No such file
+      #   slapd stopped.
+      #
+      # So the volume is mounted at /config here, where the image's own copy is
+      # still visible, and copied in once. The copy is skipped if it is already
+      # populated, so restarts and rescaling are safe.
+      # ------------------------------------------------------------------
+      initContainers:
+        - name: seed-config
+          image: vibhuvioio/openldap:2.6.10
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              if [ -n "$(ls -A /config)" ]; then
+                echo "cn=config already initialised, leaving it alone"
+                exit 0
+              fi
+              cp -a /etc/openldap/slapd.d/. /config/
+              echo "seeded $(find /config -mindepth 1 | wc -l) cn=config entries"
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      containers:
+        - name: openldap
+          image: vibhuvioio/openldap:2.6.10
+          ports:
+            - name: ldap
+              containerPort: 389
+            - name: ldaps
+              containerPort: 636
+          env:
+            - name: LDAP_DOMAIN
+              value: example.com
+            - name: LDAP_ORGANIZATION
+              value: Example Organization
+            # The *_FILE variants: the image reads the password from the mounted
+            # file instead of from the environment.
+            - name: LDAP_ADMIN_PASSWORD_FILE
+              value: /run/secrets/admin-password
+            - name: LDAP_CONFIG_PASSWORD_FILE
+              value: /run/secrets/config-password
+            - name: ENABLE_REPLICATION
+              value: "false"
+            - name: ENABLE_MONITORING
+              value: "true"
+            - name: INCLUDE_SCHEMAS
+              value: cosine,inetorgperson,nis
+          # The image ships its own healthcheck. It runs over ldapi:// with
+          # EXTERNAL authentication, so it keeps working even with anonymous
+          # binds disabled, and it requires the readiness marker startup.sh
+          # writes only after configuration succeeds - which is why a
+          # half-configured server can never look healthy.
+          #
+          # Do not add a tcpSocket probe instead: a listening socket exists
+          # before the database does.
+          startupProbe:
+            exec:
+              command: ["/usr/local/bin/scripts/healthcheck.sh", "auto"]
+            # Budget (30 x 5s = 150s) must cover a cold start on a fresh volume.
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            exec:
+              command: ["/usr/local/bin/scripts/healthcheck.sh", "auto"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["/usr/local/bin/scripts/healthcheck.sh", "auto"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              # Must exceed olcDbMaxSize, which the image hardcodes to 1 GiB.
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/ldap
+            - name: config
+              mountPath: /etc/openldap/slapd.d
+            - name: logs
+              mountPath: /logs
+            - name: secrets
+              mountPath: /run/secrets
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ldap-data
+        - name: config
+          persistentVolumeClaim:
+            claimName: ldap-config
+        - name: logs
+          persistentVolumeClaim:
+            claimName: ldap-logs
+        - name: secrets
+          secret:
+            secretName: ldap-auth
+            # 0400 is fine here: PID 1 starts as root, reads the password, then
+            # drops to uid 55. It is NOT fine for a pod that already runs as a
+            # non-root user - there the file would be unreadable and the password
+            # would silently read as empty.
+            defaultMode: 0400
+---
+# A stable name to connect to. `kubectl get svc` shows the cluster IP; from
+# another pod in the same namespace, `ldap://ldap:389` works.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ldap
+  namespace: ldap-single
+spec:
+  selector:
+    app: ldap
+  ports:
+    - name: ldap
+      port: 389
+      targetPort: ldap
+    - name: ldaps
+      port: 636
+      targetPort: ldaps

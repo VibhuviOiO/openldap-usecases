@@ -1,0 +1,3 @@
+# a kubeconfig you copy in here is never committed
+kubeconfig
+*.local.yaml

@@ -1,65 +1,87 @@
-# Vibhuvioio.com Single Node LDAP
+# vibhuvioio-com-singlenode
 
-Complete LDAP setup with Mahabharata characters for vibhuvioio.com domain.
+One server, `dc=vibhuvioio,dc=com`, custom schema and sample data loaded at init.
 
-## Quick Start
-
-```bash
-# Start LDAP (data loads automatically)
-docker-compose up -d
-
-# Wait 45 seconds for initialization
-sleep 45
-```
-
-## Verify
+## 1. Create the env file
 
 ```bash
-# Check user count (should be 20)
-docker exec openldap-vibhuvioio ldapsearch -x -H ldap://localhost:389 \
-  -b "ou=People,dc=vibhuvioio,dc=com" \
-  -D "cn=Manager,dc=vibhuvioio,dc=com" -w "changeme" \
-  "(objectClass=inetOrgPerson)" dn 2>/dev/null | grep "^dn:" | wc -l
-
-# List all users
-docker exec openldap-vibhuvioio ldapsearch -x -H ldap://localhost:389 \
-  -b "ou=People,dc=vibhuvioio,dc=com" \
-  -D "cn=Manager,dc=vibhuvioio,dc=com" -w "changeme" \
-  "(objectClass=inetOrgPerson)" uid cn
+cd vibhuvioio-com-singlenode
+cp .env.vibhuvioio.example .env.vibhuvioio
+grep -v PASSWORD .env.vibhuvioio
 ```
 
-## Data
-
-### Users (20)
-- **Pandavas (5)**: arjuna, bhima, yudhishthira, nakula, sahadeva
-- **Kauravas (3)**: duryodhana, dushasana, karna
-- **Advisors/Elders (3)**: krishna, bhishma, drona
-- **Warriors (3)**: abhimanyu, ashwatthama, kripacharya
-- **Royalty (3)**: draupadi, kunti, gandhari
-- **Leaders (3)**: vidura, shakuni, dhritarashtra
-
-### Groups (5)
-- **Pandavas** (10 members)
-- **Kauravas** (10 members)
-- **Warriors** (13 members)
-- **Administrators** (9 members)
-- **Advisors** (3 members)
-
-### Custom Schema
-- **MahabharataUser** objectClass with attributes:
-  - kingdom, weapon, role, allegiance, isWarrior, isAdmin
-
-## Configuration
-
-- **Domain**: vibhuvioio.com
-- **Port**: 389 (LDAP), 636 (LDAPS)
-- **Admin DN**: cn=Manager,dc=vibhuvioio,dc=com
-- **Admin Password**: changeme
-- **Base DN**: dc=vibhuvioio,dc=com
-
-## Cleanup
+## 2. Look at what gets loaded
 
 ```bash
-# Stop and remove all data
-docker-compose down -v
+ls custom-schema/ init/ sample/
 ```
+A schema file, an init script, and an LDIF of entries.
+
+## 3. Pick the image
+
+```bash
+export LDAP_IMAGE=vibhuvioio/openldap:2.6.10
+```
+
+## 4. Start it
+
+```bash
+LDAP_IMAGE=$LDAP_IMAGE docker compose up -d
+docker compose ps
+```
+Host ports 389 and 636.
+
+## 5. Watch the init run
+
+```bash
+docker logs openldap-vibhuvioio | tail -40
+```
+`/docker-entrypoint-initdb.d` runs once, on first init.
+
+## 6. Bind
+
+Expect `dn: dc=vibhuvioio,dc=com`.
+
+```bash
+PW=$(grep '^LDAP_ADMIN_PASSWORD=' .env.vibhuvioio | cut -d= -f2-)
+
+docker exec openldap-vibhuvioio ldapsearch -x -H ldap://localhost \
+  -D cn=Manager,dc=vibhuvioio,dc=com -w "$PW" \
+  -b dc=vibhuvioio,dc=com -s base dn
+```
+
+## 7. The base tree
+
+```bash
+docker exec openldap-vibhuvioio ldapsearch -x -H ldap://localhost \
+  -D cn=Manager,dc=vibhuvioio,dc=com -w "$PW" \
+  -b dc=vibhuvioio,dc=com -LLL dn | grep '^dn:'
+```
+Everything the init script added.
+
+## 8. The custom schema is loaded
+
+```bash
+docker exec openldap-vibhuvioio ldapsearch -Y EXTERNAL -H ldapi:/// \
+  -b cn=schema,cn=config '(objectClass=olcSchemaConfig)' cn 2>/dev/null \
+  | grep '^cn:' | tail -6
+```
+The custom schema appears after the built-in ones.
+
+## 9. Tear down
+
+```bash
+docker compose down -v
+```
+
+## What you learned
+
+- `/docker-entrypoint-initdb.d` runs scripts and LDIFs on first init only
+- `custom-schema/` is mounted read-only and loaded before the data
+- The base DN comes from `LDAP_DOMAIN` in the env file
+- `down -v` is required to re-run init
+
+## Notes
+
+- The init script is idempotent: a restart does not re-import
+- To re-import: `docker compose down -v && docker compose up -d`

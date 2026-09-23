@@ -1,0 +1,43 @@
+services:
+  openldap:
+    image: ${LDAP_IMAGE:-openldap:local}
+    container_name: openldap-rotation
+    hostname: openldap-rotation
+    environment:
+      - LDAP_DOMAIN=example.com
+      - LDAP_ADMIN_PASSWORD_FILE=/run/secrets/ldap_admin_password
+      - LDAP_CONFIG_PASSWORD_FILE=/run/secrets/ldap_config_password
+      - LDAP_ORGANIZATION=Example Organization (Password Rotation)
+      - ENABLE_MONITORING=true
+    ports:
+      - "395:389"
+    volumes:
+      - ldap-data:/var/lib/ldap
+      - ldap-config:/etc/openldap/slapd.d
+      - ./logs:/logs
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - SETUID
+      - SETGID
+      - CHOWN
+      - DAC_READ_SEARCH
+      - DAC_OVERRIDE
+    stop_grace_period: 30s
+    secrets:
+      - ldap_admin_password
+      - ldap_config_password
+    restart: unless-stopped
+
+volumes:
+  ldap-data:
+  ldap-config:
+
+secrets:
+  ldap_admin_password:
+    file: ./secrets/admin_password.txt
+  ldap_config_password:
+    file: ./secrets/config_password.txt
