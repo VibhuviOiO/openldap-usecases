@@ -35,6 +35,10 @@ docker network create ldap-shared-network 2>/dev/null || true
 echo ""
 echo "→ Starting container with password policy..."
 cd "$(dirname "$0")"
+
+# The real env file is gitignored, so a fresh clone only has the committed
+# template. Without this, docker compose dies on the missing env_file.
+[ -f .env.password-policy ] || cp .env.password-policy.example .env.password-policy
 LDAP_IMAGE="$IMAGE" docker compose -f "$COMPOSE_FILE" -p "$CONTAINER_NAME" up -d
 
 # Wait for initialization
@@ -93,7 +97,7 @@ echo ""
 echo "→ Test 3: Create test user..."
 docker exec -i "$ACTUAL_CONTAINER" ldapadd -x \
     -D "cn=Manager,$BASE_DN" \
-    -w "admin123" 2>/dev/null << LDIF || true
+    -w "$LDAP_ADMIN_PASSWORD" 2>/dev/null << LDIF || true
 dn: uid=ppolicytest,$BASE_DN
 objectClass: inetOrgPerson
 uid: ppolicytest
@@ -107,7 +111,7 @@ sleep 2
 echo ""
 echo "→ Test 4: Verify user created..."
 if docker exec "$ACTUAL_CONTAINER" ldapsearch -x \
-    -D "cn=Manager,$BASE_DN" -w "admin123" \
+    -D "cn=Manager,$BASE_DN" -w "$LDAP_ADMIN_PASSWORD" \
     -b "uid=ppolicytest,$BASE_DN" \
     -s base 2>&1 | grep -q "cn: Password Policy Test"; then
     echo -e "${GREEN}✓ Test user created${NC}"

@@ -28,17 +28,8 @@ Chart never generates passwords; regenerating them breaks replication.
 
 ## 3. Install
 
-Published chart:
-
 ```bash
 helm install ldap vibhuvioio/openldap -n ldap-helm \
-  --set auth.existingSecret=ldap-auth --wait
-```
-
-Local checkout:
-
-```bash
-helm install ldap /Users/balu/OiO/repos/openldap/openldap-helmchart -n ldap-helm \
   --set auth.existingSecret=ldap-auth --wait
 ```
 `--wait` returns only when all providers are Ready.
@@ -97,7 +88,7 @@ kubectl -n ldap-helm exec ldap-openldap-0 -- \
 ## 9. Upgrade in place
 
 ```bash
-helm upgrade ldap /Users/balu/OiO/repos/openldap/openldap-helmchart -n ldap-helm \
+helm upgrade ldap vibhuvioio/openldap -n ldap-helm \
   --set auth.existingSecret=ldap-auth --set backup.enabled=true --wait
 ```
 Data lives in the claims, so it survives.
@@ -126,7 +117,7 @@ kubectl -n ldap-helm logs job/backup-check
 ```bash
 kubectl -n ldap-helm create secret tls ldap-tls --cert=tls.crt --key=tls.key
 
-helm upgrade ldap /Users/balu/OiO/repos/openldap/openldap-helmchart -n ldap-helm \
+helm upgrade ldap vibhuvioio/openldap -n ldap-helm \
   --set auth.existingSecret=ldap-auth --set tls.enabled=true \
   --set tls.existingSecret=ldap-tls --wait
 ```

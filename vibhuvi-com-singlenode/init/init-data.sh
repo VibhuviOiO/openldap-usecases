@@ -2,9 +2,13 @@
 set -e
 
 LDAP_URI="ldap://localhost:389"
-ADMIN_DN="cn=Manager,dc=vibhuvi,dc=com"
-ADMIN_PW="changeme"
-BASE_DN="dc=vibhuvi,dc=com"
+BASE_DN="${LDAP_BASE_DN:-dc=vibhuvi,dc=com}"
+ADMIN_DN="${LDAP_ADMIN_DN:-cn=Manager,${BASE_DN}}"
+# Read the password from the container environment instead of hardcoding it.
+# The hardcoded value only matched because .env.vibhuvi happened to use it, and
+# that file is gitignored - a fresh clone gets the committed template, whose
+# password differs, so the import silently loaded nothing.
+ADMIN_PW="${LDAP_ADMIN_PASSWORD:-changeme}"
 
 # Secure credential file (avoid password in ps output)
 CREDS_FILE=$(mktemp /tmp/ldap_creds.XXXXXX)

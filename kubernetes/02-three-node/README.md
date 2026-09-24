@@ -13,12 +13,18 @@ Namespace, secret, two services, one StatefulSet.
 
 ## 2. Wait for all three
 
+This blocks until all three are Ready — run it before the steps below:
+
 ```bash
+kubectl -n ldap-cluster wait --for=condition=Ready pod -l app=ldap --timeout=10m
 kubectl -n ldap-cluster get pods,pvc -o wide
 ```
 Want `ldap-0`, `ldap-1`, `ldap-2` all `1/1 Running`.
 
 Nine claims must be `Bound` — three volumes per pod.
+
+Without the `wait`, `exec` fails with `pod ldap-1 does not have a host assigned`
+— the pods are not scheduled yet, not broken.
 
 ## 3. Each pod got its own identity
 
@@ -27,7 +33,7 @@ Expect `1`, `2`, `3`. Derived from the pod name.
 ```bash
 for p in ldap-0 ldap-1 ldap-2; do
   printf '%-8s ' "$p"
-  kubectl -n ldap-cluster exec "$p" -- \
+  kubectl -n ldap-cluster exec -c openldap "$p" -- \
     sh -c '. /var/run/openldap/ldap-runtime.env; echo "$SERVER_ID"'
 done
 ```
@@ -37,7 +43,7 @@ done
 Expect three `olcServerID` lines, two `olcSyncrepl`.
 
 ```bash
-kubectl -n ldap-cluster exec ldap-0 -- \
+kubectl -n ldap-cluster exec -c openldap ldap-0 -- \
   ldapsearch -Y EXTERNAL -H ldapi:/// -b cn=config \
     olcServerID olcSyncrepl 2>/dev/null | grep -E '^olc(ServerID|Syncrepl):'
 ```
@@ -45,7 +51,7 @@ kubectl -n ldap-cluster exec ldap-0 -- \
 ## 5. Write on ldap-0
 
 ```bash
-kubectl -n ldap-cluster exec -i ldap-0 -- \
+kubectl -n ldap-cluster exec -i -c openldap ldap-0 -- \
   bash -c 'printf "%s" "$(cat /run/secrets/admin-password)" > /tmp/pw; chmod 600 /tmp/pw; \
            ldapadd -x -H ldap://localhost -D cn=Manager,dc=example,dc=com -y /tmp/pw' <<'LDIF'
 dn: ou=Cluster,dc=example,dc=com
@@ -60,7 +66,7 @@ Added on one provider only.
 ```bash
 for p in ldap-1 ldap-2; do
   echo "--- $p ---"
-  kubectl -n ldap-cluster exec "$p" -- \
+  kubectl -n ldap-cluster exec -c openldap "$p" -- \
     bash -c 'printf "%s" "$(cat /run/secrets/admin-password)" > /tmp/pw; chmod 600 /tmp/pw; \
              ldapsearch -x -H ldap://localhost -D cn=Manager,dc=example,dc=com -y /tmp/pw \
                -b ou=Cluster,dc=example,dc=com -s base dn'
@@ -73,7 +79,7 @@ Both show the entry. That is replication.
 ```bash
 for p in ldap-0 ldap-1 ldap-2; do
   printf '%-8s ' "$p"
-  kubectl -n ldap-cluster exec "$p" -- \
+  kubectl -n ldap-cluster exec -c openldap "$p" -- \
     ldapsearch -Y EXTERNAL -H ldapi:/// -b dc=example,dc=com -s base contextCSN 2>/dev/null \
     | grep '^contextCSN:'
 done
@@ -83,7 +89,7 @@ Three identical values means converged.
 ## 8. Run the validator
 
 ```bash
-kubectl -n ldap-cluster exec ldap-0 -- \
+kubectl -n ldap-cluster exec -c openldap ldap-0 -- \
   env LDAP_ADMIN_PASSWORD_FILE=/run/secrets/admin-password \
   /usr/local/bin/scripts/ldapcheck.sh --peers
 ```
@@ -100,7 +106,7 @@ It comes back on its own.
 ## 10. Write while it was away
 
 ```bash
-kubectl -n ldap-cluster exec -i ldap-0 -- \
+kubectl -n ldap-cluster exec -i -c openldap ldap-0 -- \
   bash -c 'printf "%s" "$(cat /run/secrets/admin-password)" > /tmp/pw; chmod 600 /tmp/pw; \
            ldapadd -x -H ldap://localhost -D cn=Manager,dc=example,dc=com -y /tmp/pw' <<'LDIF'
 dn: ou=AfterRestart,dc=example,dc=com
@@ -112,7 +118,7 @@ LDIF
 ## 11. It caught up
 
 ```bash
-kubectl -n ldap-cluster exec ldap-2 -- \
+kubectl -n ldap-cluster exec -c openldap ldap-2 -- \
   bash -c 'printf "%s" "$(cat /run/secrets/admin-password)" > /tmp/pw; chmod 600 /tmp/pw; \
            ldapsearch -x -H ldap://localhost -D cn=Manager,dc=example,dc=com -y /tmp/pw \
              -b ou=AfterRestart,dc=example,dc=com -s base dn'

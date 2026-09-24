@@ -1,0 +1,58 @@
+name: Start k3s
+description: >
+  Start the same single-node k3s container that kubernetes/00-cluster documents,
+  so CI runs the instructions the README gives a human. Publishes 1389/1689 so
+  the hostPort checks in 01-single-node are real.
+
+runs:
+  using: composite
+  steps:
+    # v1.31.4 is deliberate, not stale: it ships containerd 1.7. k3s 1.32+ ships
+    # containerd 2.x, where slapd grows to ~6.9 GiB and gets OOMKilled. Do not
+    # "upgrade" this pin without re-reading kubernetes/README.md ("Use k3s, not
+    # kind") and re-running 01.
+    - name: Start the k3s container
+      shell: bash
+      run: |
+        docker run -d --name k3s --privileged \
+          -p 6443:6443 -p 1389:1389 -p 1689:1689 \
+          rancher/k3s:v1.31.4-k3s1 server \
+          --disable=traefik --write-kubeconfig-mode=644 --tls-san=127.0.0.1
+
+        until docker exec k3s test -f /etc/rancher/k3s/k3s.yaml; do sleep 2; done
+
+        docker exec k3s cat /etc/rancher/k3s/k3s.yaml > "$RUNNER_TEMP/k3s.yaml"
+        chmod 600 "$RUNNER_TEMP/k3s.yaml"
+        echo "KUBECONFIG=$RUNNER_TEMP/k3s.yaml" >> "$GITHUB_ENV"
+
+    - name: Wait for the API server and the node
+      shell: bash
+      run: |
+        # k3s writes the kubeconfig as soon as its API server is listening, which
+        # is BEFORE the node registers. `kubectl wait --all` fails immediately
+        # with "no matching resources found" on an empty list, so poll for the
+        # node to exist first - waiting on it is not enough.
+        for _ in $(seq 1 60); do
+          [ "$(kubectl get --raw='/readyz' 2>/dev/null)" = "ok" ] && break
+          sleep 3
+        done
+
+        for _ in $(seq 1 60); do
+          if [ "$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')" -ge 1 ]; then
+            break
+          fi
+          sleep 3
+        done
+
+        kubectl wait --for=condition=Ready node --all --timeout=5m
+
+        # k3s applies its bundled manifests as the node comes up, so the
+        # provisioner does not exist the instant the node is Ready. Without this
+        # poll, `rollout status` fails with "not found" on a fast machine.
+        for _ in $(seq 1 60); do
+          kubectl -n kube-system get deploy local-path-provisioner >/dev/null 2>&1 && break
+          sleep 3
+        done
+
+        kubectl -n kube-system rollout status deploy/local-path-provisioner --timeout=5m
+        kubectl get nodes

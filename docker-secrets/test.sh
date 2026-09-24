@@ -14,6 +14,11 @@ mkdir -p secrets
 [ -f secrets/admin_password.txt ] || printf '%s' 'SecureAdminP@ssw0rd123!' > secrets/admin_password.txt
 [ -f secrets/config_password.txt ] || printf '%s' 'SecureConfigP@ssw0rd123!' > secrets/config_password.txt
 
+# Read the password instead of hardcoding it. These files are gitignored, so a
+# developer's checkout can hold a different value than a fresh CI clone, and
+# hardcoding it made the test fail for reasons unrelated to the image.
+ADMIN_PW=$(cat secrets/admin_password.txt)
+
 COMPOSE_FILE="docker-compose.yml"
 
 echo "═══════════════════════════════════════════════════════════════"
@@ -62,7 +67,7 @@ echo "→ Test 1: Verify authentication with secret password..."
 # (base domain may not exist yet, but bind should succeed)
 if ! docker exec "$ACTUAL_CONTAINER" ldapsearch -x \
     -D "cn=Manager,dc=example,dc=com" \
-    -w "SecureAdminP@ssw0rd123!" \
+    -w "$ADMIN_PW" \
     -b "dc=example,dc=com" \
     -s base 2>&1 | grep -q "Invalid credentials"; then
     echo -e "${GREEN}✓ Authentication with secret password works${NC}"
@@ -74,7 +79,7 @@ fi
 # Test 2: Verify password is NOT exposed in environment
 echo ""
 echo "→ Test 2: Verify password not exposed in environment variables..."
-if docker exec "$ACTUAL_CONTAINER" env | grep -q "SecureAdminP@ssw0rd123"; then
+if docker exec "$ACTUAL_CONTAINER" env | grep -qF "$ADMIN_PW"; then
     echo -e "${YELLOW}⚠ Warning: Password may be exposed in environment${NC}"
 else
     echo -e "${GREEN}✓ Password not exposed in environment${NC}"

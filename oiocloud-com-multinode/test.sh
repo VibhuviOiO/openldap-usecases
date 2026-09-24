@@ -36,6 +36,12 @@ docker network create ldap-shared-network 2>/dev/null || true
 echo ""
 echo "→ Starting 3-node cluster..."
 cd "$(dirname "$0")"
+
+# The real env file is gitignored, so a fresh clone only has the committed
+# template. Without this, docker compose dies on the missing env_file.
+for n in 1 2 3; do
+    [ -f ".env.node$n" ] || cp ".env.node$n.example" ".env.node$n"
+done
 LDAP_IMAGE="$IMAGE" docker compose -f "$COMPOSE_FILE" -p "$CONTAINER_NAME" up -d
 
 # Wait for cluster initialization (longer for replication setup)
