@@ -1,9 +1,3 @@
-# One OpenLDAP server, three volumes — the docker-compose equivalent.
-#
-#   kubectl apply -f manifests.yaml
-#
-# Read 01-single-node/README.md alongside this file; it explains each block.
-
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -85,6 +79,14 @@ spec:
       labels:
         app: ldap
     spec:
+      # Kubernetes injects <SERVICE>_PORT and <SERVICE>_SERVICE_HOST for every
+      # Service in the namespace. A Service named `ldap` therefore injects
+      # LDAP_PORT=tcp://10.43.42.148:389, which collides with the image's own
+      # LDAP_PORT and makes every healthcheck probe fail:
+      #   FAILED: ldap://localhost:tcp://10.43.42.148:389 is not answering
+      # The pod serves LDAP fine but never reports Ready.
+      enableServiceLinks: false
+
       # ------------------------------------------------------------------
       # Required with this image, and easy to miss.
       #
@@ -137,10 +139,18 @@ spec:
         - name: openldap
           image: vibhuvioio/openldap:2.6.10
           ports:
+            # hostPort binds the port on the NODE, so a client on your Mac can
+            # reach it directly. 1389/1689 because ports below 1024 need root.
+            # The k3s container must publish the same ports (see 00-cluster).
+            #
+            # 1689 only answers when TLS is enabled; this use-case does not
+            # configure it, so nothing listens there yet. See tls-enabled.
             - name: ldap
               containerPort: 389
+              hostPort: 1389
             - name: ldaps
               containerPort: 636
+              hostPort: 1689
           env:
             - name: LDAP_DOMAIN
               value: example.com

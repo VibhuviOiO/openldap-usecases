@@ -5,7 +5,8 @@ The docker use-cases, with the containers running in a cluster.
 ## 1. Start the cluster
 
 ```bash
-docker run -d --name k3s --privileged -p 6443:6443 \
+docker run -d --name k3s --privileged \
+  -p 6443:6443 -p 1389:1389 -p 1689:1689 \
   rancher/k3s:v1.31.4-k3s1 server \
   --disable=traefik --write-kubeconfig-mode=644 --tls-san=127.0.0.1
 ```
@@ -56,7 +57,19 @@ Same shape as `docker compose up -d`, one file per use-case:
 
 Each README is the numbered runbook. Follow it.
 
-## 6. Stop
+Each use-case also has a `test.sh` that runs the same steps and asserts the
+outcome. CI runs one job per use-case:
+
+```bash
+cd 01-single-node && ./test.sh          # needs a cluster and KUBECONFIG
+```
+
+## 6. Moving on, and stopping
+
+Moving on: delete the namespace (last step of each use-case README). k3s stays up
+and is reused. Never recreate it between use-cases.
+
+All use-cases done:
 
 ```bash
 kubectl delete namespace ldap-single        # whichever you applied

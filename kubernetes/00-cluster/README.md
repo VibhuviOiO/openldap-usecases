@@ -5,13 +5,17 @@ A single-node cluster on your laptop, and what it is made of.
 ## 1. Start it
 
 ```bash
-docker run -d --name k3s --privileged -p 6443:6443 \
+docker run -d --name k3s --privileged \
+  -p 6443:6443 -p 1389:1389 -p 1689:1689 \
   rancher/k3s:v1.31.4-k3s1 server \
   --disable=traefik --write-kubeconfig-mode=644 --tls-san=127.0.0.1
 ```
 `--privileged`: the container runs a second container runtime inside.
 
 `-p 6443:6443`: publishes the API server to your Mac.
+
+`-p 1389:1389 -p 1689:1689`: publishes the LDAP ports the use-cases bind with
+`hostPort`, so no `kubectl port-forward` is needed.
 
 ## 2. Wait for the kubeconfig
 
@@ -94,12 +98,13 @@ docker logs k3s
 ```
 Only if the cluster itself will not start.
 
-## 8. Stop
+## 8. Stop — only after all use-cases
 
 ```bash
 docker rm -f k3s
 ```
-Removes the container, so every pod and volume goes with it.
+Takes every pod and volume with it. Between use-cases you only delete the
+namespace; the container is never recreated.
 
 ## Why k3s and not kind
 
