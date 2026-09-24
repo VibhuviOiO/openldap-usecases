@@ -50,7 +50,7 @@ jobs:
           - vibhuvioio-com-singlenode
           - oiocloud-com-multinode
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Pull the image
         run: docker pull "vibhuvioio/openldap:${IMAGE_TAG}"
@@ -117,7 +117,7 @@ jobs:
     name: kubernetes / 01-single-node
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/k3s
 
       - name: Run 01-single-node
@@ -135,7 +135,7 @@ jobs:
     name: kubernetes / 02-three-node
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/k3s
 
       - name: Run 02-three-node
@@ -153,9 +153,9 @@ jobs:
     name: kubernetes / 03-helm-chart
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/k3s
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
       # The published chart, like a user would get. Nothing here reaches into a
       # sibling checkout: this repo only consumes what `helm repo add` serves.
