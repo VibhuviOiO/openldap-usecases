@@ -3,9 +3,16 @@ logs/
 */logs/
 
 # Local environment files (may contain passwords)
+#
+# The .example templates MUST be committed: several use-cases declare
+# `env_file: .env.<name>` in their compose file, so without a template a fresh
+# clone cannot start them at all (docker compose fails on the missing file).
+# `!.env.example` alone only un-ignores that exact name, so the per-use-case
+# templates were all invisible to git.
 .env
 .env.*
 !.env.example
+!.env.*.example
 
 # Docker secrets - never commit actual secrets
 # Root-anchored patterns like "secrets/*.txt" do NOT match nested paths,

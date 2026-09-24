@@ -35,6 +35,10 @@ docker network create ldap-shared-network 2>/dev/null || true
 echo ""
 echo "→ Starting container with custom schema..."
 cd "$(dirname "$0")"
+
+# The real env file is gitignored, so a fresh clone only has the committed
+# template. Without this, docker compose dies on the missing env_file.
+[ -f .env.vibhuvi ] || cp .env.vibhuvi.example .env.vibhuvi
 LDAP_IMAGE="$IMAGE" docker compose -f "$COMPOSE_FILE" -p "$CONTAINER_NAME" up -d
 
 # Wait for initialization (longer for schema load + data import)

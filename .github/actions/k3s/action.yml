@@ -25,9 +25,34 @@ runs:
         chmod 600 "$RUNNER_TEMP/k3s.yaml"
         echo "KUBECONFIG=$RUNNER_TEMP/k3s.yaml" >> "$GITHUB_ENV"
 
-    - name: Wait for the node and the provisioner
+    - name: Wait for the API server and the node
       shell: bash
       run: |
+        # k3s writes the kubeconfig as soon as its API server is listening, which
+        # is BEFORE the node registers. `kubectl wait --all` fails immediately
+        # with "no matching resources found" on an empty list, so poll for the
+        # node to exist first - waiting on it is not enough.
+        for _ in $(seq 1 60); do
+          [ "$(kubectl get --raw='/readyz' 2>/dev/null)" = "ok" ] && break
+          sleep 3
+        done
+
+        for _ in $(seq 1 60); do
+          if [ "$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')" -ge 1 ]; then
+            break
+          fi
+          sleep 3
+        done
+
         kubectl wait --for=condition=Ready node --all --timeout=5m
+
+        # k3s applies its bundled manifests as the node comes up, so the
+        # provisioner does not exist the instant the node is Ready. Without this
+        # poll, `rollout status` fails with "not found" on a fast machine.
+        for _ in $(seq 1 60); do
+          kubectl -n kube-system get deploy local-path-provisioner >/dev/null 2>&1 && break
+          sleep 3
+        done
+
         kubectl -n kube-system rollout status deploy/local-path-provisioner --timeout=5m
         kubectl get nodes
