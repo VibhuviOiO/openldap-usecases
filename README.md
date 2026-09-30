@@ -37,16 +37,17 @@ One at a time: use-cases 1, 2, 3, 4 and 7 all publish port 389.
 
 | # | use-case | port | what it covers |
 |---|---|---|---|
-| 9 | [oiocloud-com-multinode](oiocloud-com-multinode/README.md) | 392-394, 639-641 | three servers, replication |
+| 9 | [acme-com-twinnode](acme-com-twinnode/README.md) | 396, 397 | two servers, both accept writes |
+| 10 | [oiocloud-com-multinode](oiocloud-com-multinode/README.md) | 392-394, 639-641 | three servers, replication |
 
 ### Stage 5 — Kubernetes
 
 | # | use-case | what it covers |
 |---|---|---|
-| 10 | [kubernetes/00-cluster](kubernetes/00-cluster/README.md) | a cluster on your laptop |
-| 11 | [kubernetes/01-single-node](kubernetes/01-single-node/README.md) | one server, three volumes |
-| 12 | [kubernetes/02-three-node](kubernetes/02-three-node/README.md) | replication, StatefulSet |
-| 13 | [kubernetes/03-helm-chart](kubernetes/03-helm-chart/README.md) | probes, PDB, TLS, backups |
+| 11 | [kubernetes/00-cluster](kubernetes/00-cluster/README.md) | a cluster on your laptop |
+| 12 | [kubernetes/01-single-node](kubernetes/01-single-node/README.md) | one server, three volumes |
+| 13 | [kubernetes/02-three-node](kubernetes/02-three-node/README.md) | replication, StatefulSet |
+| 14 | [kubernetes/03-helm-chart](kubernetes/03-helm-chart/README.md) | probes, PDB, TLS, backups |
 
 ## Conventions
 

@@ -1,0 +1,116 @@
+# Two servers, N-way (multi-provider) mesh: each lists the other as a peer, so
+# both accept writes and both pull the other's changes. A 2-node directory sits
+# between vibhuvioio-com-singlenode (1 node) and oiocloud-com-multinode (3), so
+# the monitoring stack shows three different cluster shapes side by side.
+#
+# Schemas every node must load. Defined once and applied to both: a node that
+# skips inetorgperson cannot normalise these entries and rejects every
+# replicated one with "normalization failed (21)".
+x-openldap-schemas: &openldap-schemas
+  environment:
+    - INCLUDE_SCHEMAS=cosine,inetorgperson,nis
+
+services:
+  openldap-node1:
+    image: ${LDAP_IMAGE:-openldap:local}
+    container_name: openldap-acme-node1
+    hostname: openldap-acme-node1
+    env_file:
+      - .env.node1
+    <<: *openldap-schemas
+    ports:
+      - "396:389"
+      - "643:636"
+    volumes:
+      - ldap-data-node1:/var/lib/ldap
+      - ldap-config-node1:/etc/openldap/slapd.d
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+      - DAC_OVERRIDE
+      - NET_BIND_SERVICE
+      - SETUID
+      - SETGID
+      - CHOWN
+
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 128M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    networks:
+      - ldap-shared-network
+
+  openldap-node2:
+    image: ${LDAP_IMAGE:-openldap:local}
+    container_name: openldap-acme-node2
+    hostname: openldap-acme-node2
+    env_file:
+      - .env.node2
+    <<: *openldap-schemas
+    ports:
+      - "397:389"
+      - "644:636"
+    volumes:
+      - ldap-data-node2:/var/lib/ldap
+      - ldap-config-node2:/etc/openldap/slapd.d
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+      - DAC_OVERRIDE
+      - NET_BIND_SERVICE
+      - SETUID
+      - SETGID
+      - CHOWN
+
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 128M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    networks:
+      - ldap-shared-network
+    depends_on:
+      - openldap-node1
+
+volumes:
+  ldap-data-node1:
+  ldap-config-node1:
+  ldap-data-node2:
+  ldap-config-node2:
+
+networks:
+  ldap-shared-network:
+    external: true

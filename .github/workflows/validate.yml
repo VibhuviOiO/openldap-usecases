@@ -48,6 +48,7 @@ jobs:
           - tls-enabled
           - vibhuvi-com-singlenode
           - vibhuvioio-com-singlenode
+          - acme-com-twinnode
           - oiocloud-com-multinode
     steps:
       - uses: actions/checkout@v4

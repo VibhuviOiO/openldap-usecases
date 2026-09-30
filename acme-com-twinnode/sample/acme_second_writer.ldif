@@ -1,0 +1,21 @@
+# Written to node2, not node1.
+#
+# Two providers that bootstrapped separately each carry a contextCSN for their
+# own sid only: node1 wrote everything with sid 001, node2 ignored node1's
+# base-DN adds because it already had those entries. Until each node accepts a
+# change from the other's sid, their contextCSN sets differ and a sync check
+# reports the pair as not converged. One write on node2 closes that - which is
+# also what proves the mesh replicates in both directions rather than one.
+dn: uid=frank,ou=People,dc=acme,dc=com
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: frank
+cn: Frank Foster
+sn: Foster
+givenName: Frank
+mail: frank@acme.com
+uidNumber: 10006
+gidNumber: 10006
+homeDirectory: /home/frank
+loginShell: /bin/bash
+userPassword: FrankPass123!

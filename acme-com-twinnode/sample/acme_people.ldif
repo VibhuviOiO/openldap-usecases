@@ -1,0 +1,72 @@
+# ou=People already exists: the image's create-base-domain.ldif ships
+# dc=acme,dc=com, cn=Manager, ou=People, ou=Group and ou=Services. Adding it here
+# again is what "ldap_add: Already exists (68)" was.
+dn: uid=alice,ou=People,dc=acme,dc=com
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: alice
+cn: Alice Anderson
+sn: Anderson
+givenName: Alice
+mail: alice@acme.com
+uidNumber: 10001
+gidNumber: 10001
+homeDirectory: /home/alice
+loginShell: /bin/bash
+userPassword: AlicePass123!
+
+dn: uid=bob,ou=People,dc=acme,dc=com
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: bob
+cn: Bob Baker
+sn: Baker
+givenName: Bob
+mail: bob@acme.com
+uidNumber: 10002
+gidNumber: 10002
+homeDirectory: /home/bob
+loginShell: /bin/bash
+userPassword: BobPass123!
+
+dn: uid=carol,ou=People,dc=acme,dc=com
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: carol
+cn: Carol Clark
+sn: Clark
+givenName: Carol
+mail: carol@acme.com
+uidNumber: 10003
+gidNumber: 10003
+homeDirectory: /home/carol
+loginShell: /bin/bash
+userPassword: CarolPass123!
+
+dn: uid=dave,ou=People,dc=acme,dc=com
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: dave
+cn: Dave Davis
+sn: Davis
+givenName: Dave
+mail: dave@acme.com
+uidNumber: 10004
+gidNumber: 10004
+homeDirectory: /home/dave
+loginShell: /bin/bash
+userPassword: DavePass123!
+
+dn: uid=erin,ou=People,dc=acme,dc=com
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: erin
+cn: Erin Evans
+sn: Evans
+givenName: Erin
+mail: erin@acme.com
+uidNumber: 10005
+gidNumber: 10005
+homeDirectory: /home/erin
+loginShell: /bin/bash
+userPassword: ErinPass123!
