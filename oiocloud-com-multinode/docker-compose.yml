@@ -1,3 +1,10 @@
+# Schemas every node must load. The custom oiocloud schema depends on
+# inetorgperson, so a node that skips it cannot normalise employeeID=<id> RDNs
+# and rejects every replicated entry. Defined once, applied to all three.
+x-openldap-schemas: &openldap-schemas
+  environment:
+    - INCLUDE_SCHEMAS=cosine,inetorgperson,nis
+
 services:
   openldap-node1:
     image: ${LDAP_IMAGE:-openldap:local}
@@ -8,8 +15,7 @@ services:
       # Entry data in this use-case uses inetOrgPerson/posixAccount. Without
       # these schemas ldapadd fails with "objectClass: value #0 invalid per syntax".
       # Kept here rather than in .env.* because .env.* is gitignored.
-    environment:
-      - INCLUDE_SCHEMAS=cosine,inetorgperson,nis
+    <<: *openldap-schemas
     ports:
       - "392:389"
       - "639:636"
@@ -43,7 +49,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
           cpus: '1.0'
         reservations:
           memory: 128M
@@ -59,6 +65,7 @@ services:
       - ldap-shared-network
 
   openldap-node2:
+    <<: *openldap-schemas
     image: ${LDAP_IMAGE:-openldap:local}
     container_name: openldap-oiocloud-node2
     hostname: openldap-oiocloud-node2
@@ -95,7 +102,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
           cpus: '1.0'
         reservations:
           memory: 128M
@@ -113,6 +120,7 @@ services:
       - openldap-node1
 
   openldap-node3:
+    <<: *openldap-schemas
     image: ${LDAP_IMAGE:-openldap:local}
     container_name: openldap-oiocloud-node3
     hostname: openldap-oiocloud-node3
@@ -149,7 +157,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
           cpus: '1.0'
         reservations:
           memory: 128M

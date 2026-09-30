@@ -30,7 +30,7 @@ Without the `wait`, `exec` fails with `pod ldap-1 does not have a host assigned`
 
 Expect `1`, `2`, `3`. Derived from the pod name.
 
-```bash
+```bashrm 
 for p in ldap-0 ldap-1 ldap-2; do
   printf '%-8s ' "$p"
   kubectl -n ldap-cluster exec -c openldap "$p" -- \

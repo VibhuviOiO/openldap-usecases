@@ -18,14 +18,24 @@ trap 'rm -f "$CREDS_FILE"' EXIT
 
 # Wait for LDAP to be ready with proper credentials
 echo "⏳ Waiting for LDAP to be ready..."
-for i in {1..10}; do
+READY=false
+for i in $(seq 1 60); do
     if ldapsearch -x -H "$LDAP_URI" -b "$BASE_DN" -D "$ADMIN_DN" -y "$CREDS_FILE" -s base dn >/dev/null 2>&1; then
         echo "✅ LDAP is ready"
+        READY=true
         break
     fi
-    echo "  Attempt $i/10 failed, waiting..."
+    echo "  Attempt $i/60 failed, waiting..."
     sleep 3
 done
+
+# Never fall through to an import that cannot work. 30s was not enough for a
+# three-provider startup, and the old code abandoned the loop and ran the import
+# anyway - so the directory came up with no data and no error anywhere.
+if [ "$READY" != true ]; then
+    echo "❌ LDAP not ready after 180s with the configured credentials; aborting import"
+    exit 1
+fi
 
 echo "🔍 Checking if data already exists..."
 if ldapsearch -x -H "$LDAP_URI" -b "ou=People,$BASE_DN" -D "$ADMIN_DN" -y "$CREDS_FILE" "(cn=Akira Tanaka)" dn 2>/dev/null | grep -q "^dn:"; then
